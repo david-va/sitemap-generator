@@ -1,21 +1,23 @@
-import logging
 import asyncio
+import logging
 import re
+import sys
 import urllib.parse
-from pysitemap.format_processors.xml import XMLWriter
-from pysitemap.format_processors.text import TextWriter
+
 import aiohttp
+
+from pysitemap.format_processors.text import TextWriter
+from pysitemap.format_processors.xml import XMLWriter
 
 
 class Crawler:
-
     format_processors = {
         'xml': XMLWriter,
         'txt': TextWriter
     }
 
     def __init__(self, rooturl, out_file, out_format='xml', maxtasks=100,
-                 todo_queue_backend=set, done_backend=dict):
+                 todo_queue_backend=set, done_backend=dict, max_done_urls=sys.maxsize):
         """
         Crawler constructor
         :param rooturl: root url of site
@@ -26,13 +28,17 @@ class Crawler:
         :type out_format: str
         :param maxtasks: maximum count of tasks. Default 100
         :type maxtasks: int
+        :param max_done_urls: maximum of done url. Default sys.maxsize
+        :type max_done_urls: int
         """
-        self.rooturl = rooturl
+        # normalize url
+        self.rooturl = rooturl.replace('://www.', '://')
         self.todo_queue = todo_queue_backend()
         self.busy = set()
         self.done = done_backend()
         self.tasks = set()
         self.sem = asyncio.Semaphore(maxtasks)
+        self.max_done_urls = max_done_urls
 
         # connector stores cookies between requests and uses connection pool
         self.session = aiohttp.ClientSession()
@@ -45,12 +51,12 @@ class Crawler:
         """
         t = asyncio.ensure_future(self.addurls([(self.rooturl, '')]))
         await asyncio.sleep(1)
-        while self.busy:
+        while self.busy and len(self.done) < self.max_done_urls:
             await asyncio.sleep(1)
 
         await t
         await self.session.close()
-        await self.writer.write([key for key, value in self.done.items() if value])
+        # await self.writer.write([key for key, value in self.done.items() if value])
 
     async def addurls(self, urls):
         """
@@ -59,8 +65,10 @@ class Crawler:
         :return:
         """
         for url, parenturl in urls:
+            if len(self.done) > self.max_done_urls: return
             url = urllib.parse.urljoin(parenturl, url)
             url, frag = urllib.parse.urldefrag(url)
+            url = url.replace('://www.', '://')
             if (url.startswith(self.rooturl) and
                     url not in self.busy and
                     url not in self.done and
@@ -83,8 +91,7 @@ class Crawler:
         :param url:
         :return:
         """
-        print('processing:', url)
-
+        if len(self.done) > self.max_done_urls: return
         # remove url from basic queue and add it into busy list
         self.todo_queue.remove(url)
         self.busy.add(url)
@@ -101,14 +108,14 @@ class Crawler:
                     ('text/html' in resp.headers.get('content-type'))):
                 data = (await resp.read()).decode('utf-8', 'replace')
                 urls = re.findall(r'(?i)href=["\']?([^\s"\'<>]+)', data)
-                asyncio.Task(self.addurls([(u, url) for u in urls]))
+                if len(self.done) < self.max_done_urls:
+                    asyncio.Task(self.addurls([(u, url) for u in urls]))
 
             # even if we have no exception, we can mark url as good
             resp.close()
             self.done[url] = True
 
         self.busy.remove(url)
+
         logging.info(len(self.done), 'completed tasks,', len(self.tasks),
-              'still pending, todo_queue', len(self.todo_queue))
-
-
+                     'still pending, todo_queue', len(self.todo_queue))
