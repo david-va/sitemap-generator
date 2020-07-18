@@ -5,6 +5,7 @@ import sys
 import urllib.parse
 
 import aiohttp
+from aiohttp.client import ClientTimeout
 
 from pysitemap.format_processors.text import TextWriter
 from pysitemap.format_processors.xml import XMLWriter
@@ -97,7 +98,7 @@ class Crawler:
         self.busy.add(url)
 
         try:
-            resp = await self.session.get(url)  # await response
+            resp = await self.session.get(url, timeout=ClientTimeout(total=0, sock_connect=5, sock_read=5))  # await response
         except Exception as exc:
             # on any exception mark url as BAD
             print('...', url, 'has error', repr(str(exc)))
