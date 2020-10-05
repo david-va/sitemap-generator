@@ -21,7 +21,7 @@ setup(
     version=VERSION,
     packages=find_packages(exclude=EXCLUDE_FROM_PACKAGES),
     include_package_data=True,
-    url='https://github.com/Haikson/sitemap-generator',
+    url='https://github.com/david-va/sitemap-generator',
     license='GPL3',
     author='Kamo Petrosyan',
     author_email='kamo@haikson.com',
